@@ -226,6 +226,7 @@ const sfx={
 
 
 /* ---------- music ---------- */
+const MUSIC_VOL=0.8; // 使用者：音樂整體調成原本的 80%（角色語音不變）
 const MUSIC={normal:{src:'bgm_normal.mp3',loop:true,ls:12.4920,le:108.4400,vol:0.5},
   sale:{src:'bgm_sale.mp3',loop:true,ls:16.5330,le:68.6570,vol:0.55},
   win:{src:'jingle_win.mp3',loop:false,vol:0.7},
@@ -259,15 +260,15 @@ function stopBgm(f=0.5){ if(!mcur) return; const c=mcur; mcur=null; try{ c.g.gai
 function playBgm(k,f=0.6){ mwant=k; if(!AC) return; loadMusic(); if(mcur&&mcur.name===k) return; stopBgm(f);
   const b=mbuf[k]; if(!b||!musicOn) return; const m=MUSIC[k];
   const s=AC.createBufferSource(); s.buffer=b; if(m.loop){ s.loop=true; s.loopStart=m.ls; s.loopEnd=m.le; }
-  const g=AC.createGain(); g.gain.setValueAtTime(0.0001,AC.currentTime); g.gain.setTargetAtTime(m.vol,AC.currentTime,f/4);
+  const g=AC.createGain(); g.gain.setValueAtTime(0.0001,AC.currentTime); g.gain.setTargetAtTime(m.vol*MUSIC_VOL,AC.currentTime,f/4);
   s.connect(g); g.connect(AC.destination); s.start(); mcur={name:k,s,g};
   if(!m.loop) s.onended=()=>{ if(mcur&&mcur.s===s) mcur=null; }; }
 // character voice: plays over the music (ducked), stoppable when the cut-in is skipped
 let vcur=null, ultMusT=0; function playVoice(k){ if(!AC) return; loadMusic(); stopVoice(); const b=mbuf[k]; if(!b) return;
   const s=AC.createBufferSource(); s.buffer=b; const g=AC.createGain(); g.gain.value=MUSIC[k].vol; s.connect(g); g.connect(AC.destination); s.start(); vcur={s,g};
-  if(mcur){ try{ mcur.g.gain.setTargetAtTime(MUSIC[mcur.name].vol*0.3,AC.currentTime,0.08); }catch(e){} }
+  if(mcur){ try{ mcur.g.gain.setTargetAtTime(MUSIC[mcur.name].vol*MUSIC_VOL*0.3,AC.currentTime,0.08); }catch(e){} }
   s.onended=()=>{ if(vcur&&vcur.s===s){ vcur=null; duckOff(); } }; }
-function duckOff(){ if(mcur){ try{ mcur.g.gain.setTargetAtTime(MUSIC[mcur.name].vol,AC.currentTime,0.2); }catch(e){} } }
+function duckOff(){ if(mcur){ try{ mcur.g.gain.setTargetAtTime(MUSIC[mcur.name].vol*MUSIC_VOL,AC.currentTime,0.2); }catch(e){} } }
 function stopVoice(){ if(!vcur) return; const v=vcur; vcur=null; try{ v.g.gain.setTargetAtTime(0,AC.currentTime,0.04); v.s.stop(AC.currentTime+0.2); }catch(e){} duckOff(); }
 function setDangerTempo(on){ if(mcur&&MUSIC[mcur.name].loop&&mcur.name!=='sale'){ try{ mcur.s.playbackRate.setTargetAtTime(on?1.1:1,AC.currentTime,0.3); }catch(e){} } }
 document.addEventListener('visibilitychange',()=>{ if(!AC) return; if(document.hidden) AC.suspend(); else AC.resume(); });
@@ -763,7 +764,11 @@ function finishPop(){
   popping=[]; gravity(); phase='fall';
 }
 
+let SAT=0, SAB=0;
+function safeInsets(){ try{ const d=document.createElement('div'); d.style.cssText='position:fixed;left:0;top:0;width:0;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)'; document.body.appendChild(d); const cs=getComputedStyle(d); SAT=parseFloat(cs.paddingTop)||0; SAB=parseFloat(cs.paddingBottom)||0; d.remove(); }catch(e){ SAT=SAB=0; } }
 function layout(){
+  if(navigator.standalone&&screen.height>cv.clientHeight+20&&Math.abs(screen.width-cv.clientWidth)<4) cv.style.height=screen.height+'px';
+  safeInsets();
   DPR=Math.min(2.5,window.devicePixelRatio||1); W=cv.clientWidth; H=cv.clientHeight;
   cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
   const pad=Math.max(8,W*0.025);
@@ -775,9 +780,9 @@ function layout(){
   const SIGN=0.1235, AWN=0.2225; /* sign ends at its wood frame; resume right below the awning scallops */ { let pw=W,ph=W/ar; const need=H/(1-(AWN-SIGN)); if(ph<need){ ph=need; pw=ph*ar; } L.pbg={x:(W-pw)/2,y:0,w:pw,h:ph,sign:SIGN,awn:AWN}; L.shift=0; }
   L.pbg=Object.assign({},L.bg,{full:true}); L.shift=0; /* play uses the same full shop front (sign + awning) as the menu */
   const awn=L.awnMenu; L.awn=awn; L.ceil=awn;
-  L.mute={x:W-pad-36,y:pad*0.5,w:36,h:36};
+  L.mute={x:W-pad-36,y:pad*0.5+SAT,w:36,h:36};
   const ctlH=Math.max(62,Math.min(H*0.105,92)); // thumb strip under the field so the finger never covers the board
-  L.ctlY=H-ctlH-pad*0.4; L.ctlH=ctlH;
+  L.ctlY=H-ctlH-pad*0.4-SAB*0.6; L.ctlH=ctlH;
   const bot=L.ctlY-pad*0.3;
   // board: deep-indigo glass, noren hangs from the awning over its top edge
   // Puyo-style: field on the left, NEXT + character + gauge in the side column, info bar under the field
@@ -1581,12 +1586,12 @@ function drawTitle(){
   const bk=Math.max(0,Math.min(1,(titleT-d-0.75)/0.35)); if(bk<=0){ for(const t of texts) drawChainText(t); return; }
   ctx.save(); ctx.globalAlpha=bk; ctx.translate(0,(1-bk)*30);
   const bwid=Math.min(W*0.66,320), bht=Math.max(54,Math.min(72,bwid*0.2));
-  capsule('開始',W/2,Math.min(H-bht*1.6,by+bh*0.875),bwid,bht,()=>{ audio(); sfx.rot(); gotoMenu(); });
-  const fs=Math.max(11,W*0.03);
-  text('‹ 返回放映室',W*0.05,H-fs*1.6,fs*1.05,'#fff8e6','left','rgba(40,30,20,0.75)',700);
-  text('🎬 角色動作檢視',W*0.95,H-fs*1.6,fs*1.05,'#fff8e6','right','rgba(40,30,20,0.75)',700);
-  UI.push({x:W*0.55,y:H-fs*3.2,w:W*0.45,h:fs*3.2,act:()=>{ audio(); viewerLoad(0); }});
-  UI.push({x:0,y:H-fs*3.2,w:W*0.4,h:fs*3.2,act:()=>{ post({type:'yaoya-exit'}); texts.push({s:'（接上主程式後會回到放映室）',t:0,x:W/2,y:H*0.8,small:true}); }});
+  capsule('開始',W/2,Math.min(H-SAB-bht*1.6,by+bh*0.875),bwid,bht,()=>{ audio(); sfx.rot(); gotoMenu(); });
+  const fs=Math.max(11,W*0.03), fy=H-SAB;
+  text('‹ 返回放映室',W*0.05,fy-fs*1.6,fs*1.05,'#fff8e6','left','rgba(40,30,20,0.75)',700);
+  text('🎬 角色動作檢視',W*0.95,fy-fs*1.6,fs*1.05,'#fff8e6','right','rgba(40,30,20,0.75)',700);
+  UI.push({x:W*0.55,y:fy-fs*3.2,w:W*0.45,h:fs*3.2,act:()=>{ audio(); viewerLoad(0); }});
+  UI.push({x:0,y:fy-fs*3.2,w:W*0.4,h:fs*3.2,act:()=>{ post({type:'yaoya-exit'}); texts.push({s:'（接上主程式後會回到放映室）',t:0,x:W/2,y:H*0.8,small:true}); }});
   ctx.restore();
   for(const t of texts) drawChainText(t);
 }
@@ -1688,9 +1693,9 @@ function drawResult(o){
   // 清爽版：結果 → 戰利品 → 集點 → 下一步 → 對手的話
   const a=Math.min(1,o.t*4); ctx.fillStyle=`rgba(22,13,9,${0.82*a})`; ctx.fillRect(0,0,W,H); ctx.globalAlpha=a;
   const lv=LEVELS[lvl], tf=Math.min(W*0.1,46), sc=o.t<0.3?backOut(o.t/0.3):1, rs=Math.max(13,Math.min(W*0.042,18));
-  ctx.save(); ctx.translate(W/2,H*0.085); ctx.scale(sc,sc); text(o.win?'籃子滿出來啦！':(o.why==='time'?'時間到…':'菜籃塞爆了…'),0,0,tf,o.win?'#ffe36b':'#ffd9c9','center',o.win?'#7a2c12':'#6a2a1a',900); ctx.restore();
+  ctx.save(); ctx.translate(W/2,H*0.085+SAT*0.5); ctx.scale(sc,sc); text(o.win?'籃子滿出來啦！':(o.why==='time'?'時間到…':'菜籃塞爆了…'),0,0,tf,o.win?'#ffe36b':'#ffd9c9','center',o.win?'#7a2c12':'#6a2a1a',900); ctx.restore();
   // the prize is the headline
-  { const y=H*0.085+tf*1.05, fs=Math.max(15,Math.min(W*0.05,22)); text(o.win?('搶到了！'+lv.item):('被搶走了… '+lv.item),W/2,y,fs,o.win?'#fff4dc':'rgba(255,238,205,0.7)','center','rgba(0,0,0,0.6)',900); }
+  { const y=H*0.085+SAT*0.5+tf*1.05, fs=Math.max(15,Math.min(W*0.05,22)); text(o.win?('搶到了！'+lv.item):('被搶走了… '+lv.item),W/2,y,fs,o.win?'#fff4dc':'rgba(255,238,205,0.7)','center','rgba(0,0,0,0.6)',900); }
   // one compact card: stage name, one line of stats, stamps
   const px=W*0.08, pw=W*0.84, py=H*0.085+tf*1.9, ph=rs*9.2; glass(px,py,pw,ph,12);
   let y=py+rs*1.4; text(lv.name,W/2,y,rs*1.05,'#fff4dc','center',null,900);
@@ -1735,7 +1740,7 @@ function drawResult(o){
 }
 function quoteBar(o,lv,txt){ let fs=Math.max(14,Math.min(W*0.045,20)); const msg=(txt||(o.win?lv.win:lv.lose)).replace(/（[^）]*）(?=.)/g,'……').replace(/（[^）]*）/g,'').replace(/\n/g,' ').replace(/\s+/g,' ').trim(), mw=W*0.9;
   ctx.font=`900 ${fs}px ${FONT}`; const w1=ctx.measureText(msg).width; if(w1>mw&&w1<mw*1.2) fs*=mw/w1; // just over one line → shrink instead of leaving a 1-char orphan
-  const lines=wrapLines(msg,mw,fs).slice(0,2), bh=lines.length*fs*1.4+fs*1.3; return {fs,lines,bh,bY:H-bh-Math.max(10,H*0.025)}; }
+  const lines=wrapLines(msg,mw,fs).slice(0,2), bh=lines.length*fs*1.4+fs*1.3; return {fs,lines,bh,bY:H-bh-Math.max(10,H*0.025)-SAB*0.7}; }
 function drawTutSkip(){ if(!TUTR.on||!SV.tutDone||overlay||paused||sale||banner) return;
   const fs=14, w=110, h=30, x=12, y=Math.max(6,L.awn-h-4);
   rrect(x,y,w,h,15); ctx.fillStyle='rgba(20,28,56,0.85)'; ctx.fill(); ctx.lineWidth=1.2; ctx.strokeStyle='rgba(255,238,205,0.7)'; ctx.stroke();
