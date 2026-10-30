@@ -765,9 +765,17 @@ function finishPop(){
 }
 
 let SAT=0, SAB=0;
+// iPhone home-screen app (translucent status bar): innerHeight / 100% come out short by the status bar, leaving a dark band at the bottom.
+// A home-screen app always covers the whole screen, so there the screen height wins (same fix as 甜點筆記 v89 / 麻將篇). html, body and the
+// canvas all get the height — body is overflow:hidden, so sizing only the canvas would just clip it.
+function appHeight(){ const m=q=>{ try{ return matchMedia(q).matches; }catch(e){ return false; } };
+  const home=navigator.standalone===true||m('(display-mode: standalone)')||m('(display-mode: fullscreen)');
+  let h=Math.round((window.visualViewport&&visualViewport.height)||innerHeight);
+  if(home&&screen.width&&screen.height){ const S=innerWidth<=innerHeight?Math.max(screen.width,screen.height):Math.min(screen.width,screen.height); if(S>=innerHeight&&S-innerHeight<=120) h=S; }
+  const px=h+'px'; document.documentElement.style.height=px; document.body.style.height=px; cv.style.height=px; return h; }
 function safeInsets(){ try{ const d=document.createElement('div'); d.style.cssText='position:fixed;left:0;top:0;width:0;visibility:hidden;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)'; document.body.appendChild(d); const cs=getComputedStyle(d); SAT=parseFloat(cs.paddingTop)||0; SAB=parseFloat(cs.paddingBottom)||0; d.remove(); }catch(e){ SAT=SAB=0; } }
 function layout(){
-  if(navigator.standalone&&screen.height>cv.clientHeight+20&&Math.abs(screen.width-cv.clientWidth)<4) cv.style.height=screen.height+'px';
+  appHeight();
   safeInsets();
   DPR=Math.min(2.5,window.devicePixelRatio||1); W=cv.clientWidth; H=cv.clientHeight;
   cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
@@ -813,6 +821,7 @@ function layout(){
     BLUR=big; }catch(e){ BLUR=null; }
 }
 window.addEventListener('resize',layout);
+{ const relay=()=>{ if(state!=='loading') layout(); }; window.addEventListener('pageshow',relay); window.addEventListener('orientationchange',()=>setTimeout(relay,300)); if(window.visualViewport) visualViewport.addEventListener('resize',relay); [400,1200,2500].forEach(t=>setTimeout(relay,t)); } // iOS home-screen apps may correct their height without firing resize
 // iOS: stop the long-press loupe / text selection / callout menu
 ['touchstart','touchmove','touchend'].forEach(t=>cv.addEventListener(t,e=>{ if(e.cancelable) e.preventDefault(); },{passive:false}));
 ['contextmenu','selectstart','gesturestart','dblclick'].forEach(t=>document.addEventListener(t,e=>e.preventDefault(),{passive:false}));
