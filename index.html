@@ -204,7 +204,7 @@ const COLS=6, ROWS=13, DX=[0,1,0,-1], DY=[-1,0,1,0];
 
 /* ---------- audio ---------- */
 let AC=null;
-function audio(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(AC&&AC.state==='suspended') AC.resume(); }
+function audio(){ if(!AC){ try{ if(navigator.audioSession) navigator.audioSession.type='ambient'; }catch(e){} /* iPhone: follow the ring/silent switch */ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(AC&&AC.state==='suspended') AC.resume(); }
 function tone(f,d,type='sine',v=0.12,slide=0,delay=0){
   if(!AC) return; const t=AC.currentTime+delay; const o=AC.createOscillator(), g=AC.createGain();
   o.type=type; o.frequency.setValueAtTime(f,t); if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,f*slide),t+d);
@@ -254,17 +254,24 @@ const TIER_BGM=['normal','t1','t2','normal','t1','t2'];
 function bgmKey(){ const t=LEVELS[lvl]?LEVELS[lvl].tier:0; return TIER_BGM[t]||'normal'; }
 const mbuf={}; let mcur=null, mwant=null, musicOn=true, mloading=false;
 function decode(ab){ return new Promise((res,rej)=>{ const p=AC.decodeAudioData(ab,res,rej); if(p&&p.then) p.then(res,rej); }); }
-function loadMusic(){ if(mloading||!AC) return; mloading=true;
-  for(const k of Object.keys(MUSIC)){ fetch(MUSIC[k].src).then(r=>r.arrayBuffer()).then(decode).then(b=>{ mbuf[k]=b; if(mwant===k&&(!mcur||mcur.name!==k)) playBgm(k); }).catch(()=>{}); } }
+// Load music per stage, not all at once: every 3-minute ultimate track decodes to ~70MB of audio on an iPhone, and decoding all of them
+// together runs Safari out of memory — some decodes silently fail and those ultimates play with no music. Keep only what this stage needs.
+const mload={};
+function loadTrack(k){ if(!AC||!MUSIC[k]||mbuf[k]||mload[k]) return; mload[k]=1;
+  fetch(MUSIC[k].src).then(r=>r.arrayBuffer()).then(decode).then(b=>{ mbuf[k]=b; delete mload[k]; if(mwant===k&&(!mcur||mcur.name!==k)) playBgm(k); }).catch(()=>{ delete mload[k]; }); }
+function musicNeed(){ const L0=LEVELS[lvl], O=L0&&OPP[L0.opp], s=new Set(['normal','sale','win','lose','v_ult_mimi',bgmKey()]);
+  if(O&&O.face) s.add('u_'+O.face); if(O&&O.ultAnim) s.add('v_'+O.ultAnim); return s; }
+function loadMusic(){ if(!AC) return; const need=musicNeed();
+  for(const k of Object.keys(MUSIC)){ if(need.has(k)) loadTrack(k); else if(mbuf[k]&&/^(u_|v_ult_|t\d)/.test(k)&&!(mcur&&mcur.name===k)) delete mbuf[k]; } }
 function stopBgm(f=0.5){ if(!mcur) return; const c=mcur; mcur=null; try{ c.g.gain.cancelScheduledValues(AC.currentTime); c.g.gain.setTargetAtTime(0,AC.currentTime,f/4); c.s.stop(AC.currentTime+f+0.1); }catch(e){} }
-function playBgm(k,f=0.6){ mwant=k; if(!AC) return; loadMusic(); if(mcur&&mcur.name===k) return; stopBgm(f);
+function playBgm(k,f=0.6){ mwant=k; if(!AC) return; loadMusic(); loadTrack(k); if(mcur&&mcur.name===k) return; stopBgm(f);
   const b=mbuf[k]; if(!b||!musicOn) return; const m=MUSIC[k];
   const s=AC.createBufferSource(); s.buffer=b; if(m.loop){ s.loop=true; s.loopStart=m.ls; s.loopEnd=m.le; }
   const g=AC.createGain(); g.gain.setValueAtTime(0.0001,AC.currentTime); g.gain.setTargetAtTime(m.vol*MUSIC_VOL,AC.currentTime,f/4);
   s.connect(g); g.connect(AC.destination); s.start(); mcur={name:k,s,g};
   if(!m.loop) s.onended=()=>{ if(mcur&&mcur.s===s) mcur=null; }; }
 // character voice: plays over the music (ducked), stoppable when the cut-in is skipped
-let vcur=null, ultMusT=0; function playVoice(k){ if(!AC) return; loadMusic(); stopVoice(); const b=mbuf[k]; if(!b) return;
+let vcur=null, ultMusT=0; function playVoice(k){ if(!AC) return; loadMusic(); loadTrack(k); stopVoice(); const b=mbuf[k]; if(!b) return;
   const s=AC.createBufferSource(); s.buffer=b; const g=AC.createGain(); g.gain.value=MUSIC[k].vol; s.connect(g); g.connect(AC.destination); s.start(); vcur={s,g};
   if(mcur){ try{ mcur.g.gain.setTargetAtTime(MUSIC[mcur.name].vol*MUSIC_VOL*0.3,AC.currentTime,0.08); }catch(e){} }
   s.onended=()=>{ if(vcur&&vcur.s===s){ vcur=null; duckOff(); } }; }
@@ -295,7 +302,7 @@ function mkCell(t,row){return {t,y:row,vy:0,sq:0,pop:-1,id:uid++,blink:1+Math.ra
 
 function startLevel(i,withTut,opt={}){
   TUTR={on:false,run:false}; if(i===0&&(withTut||!SV.tutDone)) TUTR={on:true,run:true,step:-1,card:null,act:null};
-  lvl=i; grid=newGrid(); queue=[mkPair(),mkPair(),mkPair()];
+  lvl=i; loadMusic(); grid=newGrid(); queue=[mkPair(),mkPair(),mkPair()];
   got=LEVELS[lvl].types.map(()=>0); chain=0; maxChain=0; parts=[]; flyers=[]; texts=[]; bells=0; sale=null; cutin=null; banner=null; pile=[];
   fill=0; prevFill=0; marksDone=0; playT=0; marginOn=false; pending=0; armed=false; attT=0; kuma={img:'owner',t:9}; say=null; sayCD=0;
   runT=0; ownChain=0; offTotal=0; paused=false; tut={}; update.dg=false;
